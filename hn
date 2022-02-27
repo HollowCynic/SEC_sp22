@@ -1,0 +1,230 @@
+#!/bin/bash
+
+getStories() {
+        local topstories="$(curl --silent https://hacker-news.firebaseio.com/v0/${1}stories.json?print=pretty)"
+        echo "[${topstories}]" | jq > top.json
+        declare -a topStoryIDs
+        input="top.json"
+        i=0;
+        while [[ $i -lt $2 ]]; do
+                ID="$(awk 'NR == v1+3' v1="${i}"  top.json)"
+                ID="$(echo $ID)"
+                ID=${ID%?}
+                #ID=${ID#( )}
+                topStoryIDs[$i]=$ID
+                i=$(($i+1))
+        done < "top.json"
+
+        declare -a storyUrls
+        j=0
+
+        if [[ $1 == top ]]; then
+                echo "<><>" Top Articles "<><>"
+        else
+                echo "<><>" New Articles "<><>"
+        fi
+
+        for aID in "${topStoryIDs[@]}"
+        do
+                topurl=https://hacker-news.firebaseio.com/v0/item/${aID}.json?print=pretty
+                local topstory="$(curl --silent ${topurl})"
+                echo "[${topstory}]" | jq > test2.json
+                title="$(jq '.[] | .title' test2.json)"
+                time="$(jq '.[] | .time' test2.json)"
+                time="$(date -d @$time)"
+                by="$(jq '.[] | .by' test2.json)"
+                url="$(jq '.[] | .url' test2.json)"
+                url=${url%\"}
+                url=${url#\"}
+                storyUrls+=( $url )
+
+                echo " "
+                echo Story \# $j
+                echo Title: $title
+                echo Time Posted: $time
+                echo posted by: $by
+                echo url: $url
+                echo __________________________
+
+                j=$(($j+1))
+
+        done
+
+        if [[ $4 == o ]]; then
+                echo "Enter the number of the story you would like to open or exit by entering any other character..."
+                read storynumb 
+                if [ $storynumb -lt $2 ] && [ $storynumb -ge 0 ]; then
+                        open ${storyUrls[$storynumb]}
+                fi
+        fi
+
+        rm top.json 
+        rm test2.json
+
+        return
+}
+
+searchStories() {
+        if [[ $3 == date ]]; then
+                setting=_by_date
+        else
+                setting=""
+        fi
+
+        local hits="$(curl --silent https://hn.algolia.com/api/v1/search${setting}?query=${1}&tags=story)"
+        echo "${hits}" | jq > hits.json
+
+
+        declare -a storyUrls
+        j=0
+
+        echo "<><> Searched: " $1 " <><>"
+        i=0;
+        while [[ $i -lt $2 ]]; do
+                if [[ $setting == "_by_date" ]]; then
+                        title="$(jq --argjson i $i '.hits[$i].story_title' hits.json)"
+                        time="$(jq --argjson i $i '.hits[$i].created_at_i' hits.json)"
+                        time="$(date -d @$time)"
+                        url="$(jq --argjson i $i '.hits[$i].story_url' hits.json)"
+                        url="$(jq --argjson i $i '.hits[$i].url' hits.json)"
+                        url=${url%\"}
+                        url=${url#\"}
+                        storyUrls+=( $url )
+
+                        echo " "
+                        echo Story \# $i
+                        echo Title: $title
+                        echo Time Posted: $time
+                        echo posted by:
+                        echo url: $url
+                        echo __________________________
+                        i=$(($i+1))
+                else
+                        title="$(jq --argjson i $i '.hits[$i].title' hits.json)"
+                        time="$(jq --argjson i $i '.hits[$i].created_at_i' hits.json)"
+                        time="$(date -d @$time)"
+                        url="$(jq --argjson i $i '.hits[$i].url' hits.json)"
+                        url=${url%\"}
+                        url=${url#\"}
+                        storyUrls+=( $url )
+
+                        echo " "
+                        echo Story \# $i
+                        echo Title: $title
+                        echo Time Posted: $time
+                        echo posted by:
+                        echo url: $url
+                        echo __________________________
+                        i=$(($i+1))
+                fi        
+        done
+        
+        if [[ $4 == o ]]; then
+                echo "Enter the number of the story you would like to open or exit by entering any other character..."
+                read storynumb 
+                if [ $storynumb -lt $2 ] && [ $storynumb -ge 0 ]; then
+                        open ${storyUrls[$storynumb]}
+                fi
+        fi
+
+        rm hits.json
+        #return
+}
+ 
+while getopts "hot:n:s:" OPTION
+do
+        case $OPTION in
+                o)
+                        setopen=o
+                        ;;
+                t)
+                        type=top;
+                        number=$OPTARG
+                        getStories $type $number x $setopen
+                        exit
+                        ;;
+                n)
+                        type=new;
+                        number=$OPTARG
+                        getStories $type $number x $setopen
+                        exit
+                        ;;
+                s)
+                        IFS=' ' # split on space characters
+                        entries=($OPTARG) 
+                        searchStories ${entries[0]} ${entries[1]} ${entries[2]} $setopen
+                        exit
+                        ;;
+                h)
+                        echo "
+                Description:
+
+                This program allows the user to easily lookup the top and latest stories on
+                Hackernews.com. It also allows for the searching of stories using keywords and
+                gives the the option to open stories in browser.
+
+                Flags:
+
+                -t top,         follow with the number of stories you would like,
+                                if no number is given it will give the top five stories
+
+                -n new,         follow with the number of storoes you would like,
+                                if no number is given it will give the five newest stories
+
+                -s search,      look for stories must provide a key word and number
+                                of stories in quotes. Additionally, one can add the word
+                                'date' as a third argument to search by date instead of
+                                by top. ex -s \"word 7 date\"
+                
+                -o open,        must be placed as first flag, allows stories to be opened in
+                                browser after being searched.
+
+                -h help,
+                        "
+                        exit
+                        ;;
+        esac
+done
+
+
+while true; do
+    echo "
+    Please Select:
+    1. Get Top Stories
+    2. Get Latest Stories
+    3. Search For Stories
+    0. Quit
+    "
+    read -p "Enter selection [0-3] > " r1
+    clear
+    if [[ $r1 =~ ^[0-3]$ ]]; then
+        if [[ $r1 == 1 ]]; then
+            #echo "How many top stories do you want?"
+            read -p "How many top stories do you want? > "
+            getStories top $REPLY x o
+            echo ""
+            #exit 0
+        fi
+        if [[ $r1 == 2 ]]; then
+            read -p "How many new stories do you want? > "
+            getStories new $REPLY x o
+            #exit 0
+        fi
+        if [[ $r1 == 3 ]]; then
+            read -p "Enter a word to search... > "
+            word=$REPLY
+            read -p "Search by top or by latest. 't' for top, 'l' for latest > "
+            setting=$REPLY
+            read -p "How many stories do you want? > "
+            number=$REPLY
+            searchStories $word $number $setting o
+        fi
+        if [[ $r1 == 0 ]]; then
+            echo "Program Terminated..."
+            exit 0
+        fi
+    else
+        echo "Invalid entry..."
+    fi
+    read -p "Enter to continue..."
+done
